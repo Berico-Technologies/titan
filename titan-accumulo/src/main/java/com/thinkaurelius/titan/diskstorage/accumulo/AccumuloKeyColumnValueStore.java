@@ -9,17 +9,6 @@ import com.thinkaurelius.titan.diskstorage.keycolumnvalue.Mutation;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.RecordIterator;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreTransaction;
 import org.apache.commons.codec.binary.Hex;
-import org.apache.hadoop.hbase.client.Delete;
-import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HTableInterface;
-import org.apache.hadoop.hbase.client.HTablePool;
-import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.client.Result;
-import org.apache.hadoop.hbase.client.Row;
-import org.apache.hadoop.hbase.filter.ColumnPaginationFilter;
-import org.apache.hadoop.hbase.filter.ColumnRangeFilter;
-import org.apache.hadoop.hbase.filter.Filter;
-import org.apache.hadoop.hbase.filter.FilterList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,22 +19,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Experimental HBase store.
+ * Attempt at adding Accumulo data storage
  * <p/>
- * This is not ready for production.  It's pretty slow.
+ * This is inherently flawed at the moment and should not be used in production.
  * <p/>
- * Here are some areas that might need work:
- * <p/>
- * - batching? (consider HTable#batch, HTable#setAutoFlush(false)
- * - tuning HTable#setWriteBufferSize (?)
- * - writing a server-side filter to replace ColumnCountGetFilter, which drops
- * all columns on the row where it reaches its limit.  This requires getSlice,
- * currently, to impose its limit on the client side.  That obviously won't
- * scale.
- * - RowMutations for combining Puts+Deletes (need a newer HBase than 0.92 for this)
- * - (maybe) fiddle with HTable#setRegionCachePrefetch and/or #prewarmRegionCache
- * <p/>
- * There may be other problem areas.  These are just the ones of which I'm aware.
  */
 public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 

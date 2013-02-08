@@ -16,20 +16,8 @@ import com.thinkaurelius.titan.diskstorage.keycolumnvalue.Mutation;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreFeatures;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreTransaction;
 import com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration;
-import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.TableNotFoundException;
-import org.apache.hadoop.hbase.client.Delete;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.client.HTableInterface;
-import org.apache.hadoop.hbase.client.HTablePool;
-import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.client.Result;
-import org.apache.hadoop.hbase.client.ResultScanner;
-import org.apache.hadoop.hbase.client.Row;
-import org.apache.hadoop.hbase.client.Scan;
+
+import org.apache.accumulo.core.client.ZooKeeperInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,39 +29,43 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import static com.thinkaurelius.titan.diskstorage.hbase.HBaseKeyColumnValueStore.toArray;
+import static com.thinkaurelius.titan.diskstorage.accumulo.AccumuloKeyColumnValueStore.toArray;
 
 /**
- * Experimental storage manager for Accumulo.
+ * First attempt at creating an Accumulo storemanager
  * <p/>
  * This is not ready for production.
  *
- * @author Dan LaRocque <dalaro@hopcount.org>
+ * @author Daniel West <dwest@bericotechnologies.com>
  */
 public class AccumuloStoreManager extends DistributedStoreManager implements KeyColumnValueStoreManager {
 
     private static final Logger log = LoggerFactory.getLogger(HBaseStoreManager.class);
 
+   
+    public static final String INSTANCE_NAME_KEY = "instancename";
+    public static final String INSTANCE_NAME_DEFAULT = "titan";
+    
     public static final String TABLE_NAME_KEY = "tablename";
     public static final String TABLE_NAME_DEFAULT = "titan";
 
     public static final int PORT_DEFAULT = 9160;
 
-    public static final String HBASE_CONFIGURATION_NAMESPACE = "hbase-config";
+    public static final String ACCUMULO_CONFIGURATION_NAMESPACE = "accumulo-config";
 
-    public static final Map<String, String> HBASE_CONFIGURATION_MAP = new ImmutableMap.Builder<String, String>().
-            put(GraphDatabaseConfiguration.HOSTNAME_KEY, "hbase.zookeeper.quorum").
+    public static final Map<String, String> ACCUMULO_CONFIGURATION_MAP = new ImmutableMap.Builder<String, String>().
+            put(GraphDatabaseConfiguration.HOSTNAME_KEY, "hbase.zookeeper.quorum").dl
             put(GraphDatabaseConfiguration.PORT_KEY, "hbase.zookeeper.property.clientPort").
             build();
 
     private final String tableName;
     private final org.apache.hadoop.conf.Configuration hconf;
 
-    private final Map<String, HBaseKeyColumnValueStore> openStores;
+    private final Map<String, AccumuloKeyColumnValueStore> openStores;
     private final StoreFeatures features;
-    private final HTablePool connectionPool;
+    private final Connector connectionPool;
 
-    public HBaseStoreManager(org.apache.commons.configuration.Configuration config) throws StorageException {
+    public AccumuloStoreManager(org.apache.commons.configuration.Configuration config) throws StorageException {
         super(config, PORT_DEFAULT);
         this.tableName = config.getString(TABLE_NAME_KEY, TABLE_NAME_DEFAULT);
 
@@ -86,7 +78,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
 
         // Copy a subset of our commons config into a Hadoop config
         org.apache.commons.configuration.Configuration hbCommons =
-                config.subset(HBASE_CONFIGURATION_NAMESPACE);
+                config.subset(ACCUMULO_CONFIGURATION_NAMESPACE);
         @SuppressWarnings("unchecked") // I hope commons-config eventually fixes this
                 Iterator<String> keys = hbCommons.getKeys();
         int keysLoaded = 0;
@@ -94,19 +86,19 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
         while (keys.hasNext()) {
             String key = keys.next();
             String value = hbCommons.getString(key);
-            log.debug("HBase configuration: setting {}={}", key, value);
+            log.debug("Accumulo configuration: setting {}={}", key, value);
             hconf.set(key, value);
             keysLoaded++;
         }
 
-        log.debug("HBase configuration: set a total of {} configuration values", keysLoaded);
+        log.debug("Accumulo configuration: set a total of {} configuration values", keysLoaded);
 
-        connectionPool = new HTablePool(hconf, connectionPoolSize);
+        connectionPool = new ZooKeeperInstance(instance(hconf, connectionPoolSize);
 
         openStores = new HashMap<String, HBaseKeyColumnValueStore>();
 
         features = new StoreFeatures();
-        features.supportsScan = false;
+        features.supportsScan = true;
         features.supportsBatchMutation = true;
         features.supportsTransactions = false;
         features.supportsConsistentKeyOperations = true;
@@ -119,7 +111,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
 
     @Override
     public String toString() {
-        return "hbase[" + tableName + "@" + super.toString() + "]";
+        return "accumulo[" + tableName + "@" + super.toString() + "]";
     }
 
     @Override
