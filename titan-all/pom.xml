@@ -23,7 +23,7 @@
         </dependency>
         <dependency>
             <groupId>com.thinkaurelius.titan</groupId>
-            <artifactId>titan-hbase</artifactId>
+            <artifactId>titan-accumulo</artifactId>
             <version>${titan.version}</version>
         </dependency>
     </dependencies>

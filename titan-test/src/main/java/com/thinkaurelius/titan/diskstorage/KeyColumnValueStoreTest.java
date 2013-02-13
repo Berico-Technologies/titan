@@ -82,6 +82,7 @@ public abstract class KeyColumnValueStoreTest {
             for (int j = 0; j < numColumns; j++) {
                 entries.add(new Entry(KeyValueStoreUtil.getBuffer(j), KeyValueStoreUtil.getBuffer(values[i][j])));
             }
+            
             store.mutate(KeyValueStoreUtil.getBuffer(i), entries, null, tx);
         }
     }

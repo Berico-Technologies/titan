@@ -1,6 +1,7 @@
 package com.thinkaurelius.titan.diskstorage.accumulo;
 
 import com.google.common.collect.ImmutableMap;
+import com.thinkaurelius.titan.diskstorage.PermanentStorageException;
 import com.thinkaurelius.titan.diskstorage.StorageException;
 import com.thinkaurelius.titan.diskstorage.TemporaryStorageException;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.Entry;
@@ -8,13 +9,29 @@ import com.thinkaurelius.titan.diskstorage.keycolumnvalue.KeyColumnValueStore;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.Mutation;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.RecordIterator;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreTransaction;
-import org.apache.commons.codec.binary.Hex;
+import com.thinkaurelius.titan.graphdb.database.serialize.Serializer;
+import com.thinkaurelius.titan.graphdb.database.serialize.kryo.KryoSerializer;
+
+import org.apache.accumulo.core.Constants;
+import org.apache.accumulo.core.client.BatchWriter;
+import org.apache.accumulo.core.client.Connector;
+import org.apache.accumulo.core.client.IteratorSetting;
+import org.apache.accumulo.core.client.Scanner;
+import org.apache.accumulo.core.client.MutationsRejectedException;
+import org.apache.accumulo.core.client.TableNotFoundException;
+import org.apache.accumulo.core.data.Range;
+import org.apache.accumulo.core.data.Value;
+import org.apache.accumulo.core.data.Key;
+import org.apache.accumulo.core.iterators.user.RegExFilter;
+import org.apache.hadoop.io.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.nio.charset.CharacterCodingException;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -26,108 +43,129 @@ import java.util.Map;
  */
 public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 
-    private static final Logger log = LoggerFactory.getLogger(HBaseKeyColumnValueStore.class);
+    private static final Logger log = LoggerFactory.getLogger(AccumuloKeyColumnValueStore.class);
 
     private final String tableName;
-    private final HTablePool pool;
+    private final Connector connector;
+    public static final Serializer serial = new KryoSerializer(true);
 
     // This is cf.getBytes()
     private final String columnFamily;
-    private final byte[] columnFamilyBytes;
-    private final HBaseStoreManager storeManager;
+    private final Text columnFamilyText;
+    private final AccumuloStoreManager storeManager;
 
-    AccumuloKeyColumnValueStore(HTablePool pool, String tableName,
-                             String columnFamily, HBaseStoreManager storeManager) {
+    AccumuloKeyColumnValueStore(Connector connector, String tableName,
+                             String columnFamily, AccumuloStoreManager storeManager) {
         this.tableName = tableName;
-        this.pool = pool;
+        this.connector = connector;
         this.columnFamily = columnFamily;
-        this.columnFamilyBytes = columnFamily.getBytes();
+        this.columnFamilyText = new Text(columnFamily);
         this.storeManager = storeManager;
     }
 
     @Override
     public void close() throws StorageException {
-        try {
-            pool.close();
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        }
+    	
     }
 
     @Override
     public ByteBuffer get(ByteBuffer key, ByteBuffer column,
                           StoreTransaction txh) throws StorageException {
-
-        byte[] keyBytes = toArray(key);
         byte[] colBytes = toArray(column);
 
-        Get g = new Get(keyBytes);
-        g.addColumn(columnFamilyBytes, colBytes);
-        try {
-            g.setMaxVersions(1);
-        } catch (IOException e1) {
-            throw new RuntimeException(e1);
-        }
+        Scanner scanner;
+   		try {
+   			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
+   		} catch (TableNotFoundException e) {
+   			log.error("Table non-existant when scanning: {}",e);
+   			throw new PermanentStorageException(e);
+   		}
+           
+           Range range = new Range(new Text(toArray(key)));
 
-        try {
-            HTableInterface table = null;
-            Result r = null;
-
-            try {
-                table = pool.getTable(tableName);
-                r = table.get(g);
-            } finally {
-                if (null != table)
-                    table.close();
-            }
-
-            if (null == r) {
-                return null;
-            } else if (1 == r.size()) {
-                return ByteBuffer.wrap(r.getValue(columnFamilyBytes, colBytes));
-            } else if (0 == r.size()) {
-                return null;
-            } else {
-                log.warn("Found {} results for key {}, column {}, family {} (expected 0 or 1 results)",
-                        new Object[]{r.size(),
-                                new String(Hex.encodeHex(keyBytes)),
-                                new String(Hex.encodeHex(colBytes)),
-                                new String(Hex.encodeHex(columnFamilyBytes))}
-                );
-                return null;
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        }
+           
+           IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
+           try {
+   			RegExFilter.setRegexs(cfg, null, columnFamily, Text.decode(colBytes), null, false);
+   		} catch (CharacterCodingException e) {
+   			log.warn("Invalid Character Encoding: {}",e);
+   		}
+           scanner.setRange(range);
+           scanner.addScanIterator(cfg);
+               
+           Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
+           
+           if (iter.hasNext())
+           {
+        	   java.util.Map.Entry<Key,Value> e = iter.next();
+        	   
+        	   try {
+				return Text.encode(e.getValue().toString());
+			} catch (CharacterCodingException e1) {
+	   			log.warn("Invalid Character Encoding: {}",e1);
+	   			return null;
+	   		}
+           }
+           else
+           {
+        	   return null;
+           }
+           
     }
 
     @Override
     public boolean containsKeyColumn(ByteBuffer key, ByteBuffer column,
                                      StoreTransaction txh) throws StorageException {
-        return null != get(key, column, txh);
+        Scanner scanner;
+		try {
+			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
+		} catch (TableNotFoundException e) {
+			log.error("Table non-existant when scanning: {}",e);
+			throw new PermanentStorageException(e);
+		}
+        
+        Range range = new Range(new Text(toArray(key)));
+
+        IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
+        String columnName = "";
+		try {
+			columnName = Text.decode(toArray(column));
+		} catch (CharacterCodingException e) {
+			log.error("Invalid encoding: {}",e);
+		}
+		RegExFilter.setRegexs(cfg, null, columnFamily, columnName, null, false);
+		log.debug("Column Family: {} Column Value: {}", columnFamily, columnName);
+        scanner.setRange(range);
+        scanner.addScanIterator(cfg);
+            
+        Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
+        log.debug("The key column exists: {}",iter.hasNext());
+        return iter.hasNext();
     }
 
 
     @Override
     public boolean containsKey(ByteBuffer key, StoreTransaction txh) throws StorageException {
 
-        byte[] keyBytes = toArray(key);
+        Scanner scanner;
+		try {
+			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
+		} catch (TableNotFoundException e) {
+			log.error("Table non-existant when scanning: {}",e);
+			throw new PermanentStorageException(e);
+		}
+        
+        Range range = new Range(new Text(toArray(key)));
 
-        Get g = new Get(keyBytes);
-        g.addFamily(columnFamilyBytes);
-
-        try {
-            HTableInterface table = null;
-            try {
-                table = pool.getTable(tableName);
-                return table.exists(g);
-            } finally {
-                if (null != table)
-                    table.close();
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        }
+        
+        IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
+        RegExFilter.setRegexs(cfg, null, columnFamily, null, null, false);
+        scanner.setRange(range);
+        scanner.addScanIterator(cfg);
+            
+        Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
+        
+        return iter.hasNext();
     }
 
     @Override
@@ -137,13 +175,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
         byte[] colStartBytes = columnEnd.hasRemaining() ? toArray(columnStart) : null;
         byte[] colEndBytes = columnEnd.hasRemaining() ? toArray(columnEnd) : null;
 
-        Filter colRangeFilter = new ColumnRangeFilter(colStartBytes, true, colEndBytes, false);
-        Filter limitFilter = new ColumnPaginationFilter(limit, 0);
-
-        FilterList bothFilters = new FilterList(FilterList.Operator.MUST_PASS_ALL, colRangeFilter,
-                limitFilter);
-
-        return getHelper(key, bothFilters);
+        return getHelper(key, colStartBytes,colEndBytes,limit);
     }
 
     @Override
@@ -153,53 +185,77 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
         byte[] colStartBytes = columnEnd.hasRemaining() ? toArray(columnStart) : null;
         byte[] colEndBytes = columnEnd.hasRemaining() ? toArray(columnEnd) : null;
 
-        Filter colRangeFilter = new ColumnRangeFilter(colStartBytes, true, colEndBytes, false);
 
-        return getHelper(key, colRangeFilter);
+        return getHelper(key, colStartBytes,colEndBytes);
     }
 
     private List<Entry> getHelper(ByteBuffer key,
-                                  Filter getFilter) throws StorageException {
+            byte[] startColumn, byte[] endColumn) throws StorageException {
+    	return getHelper(key,startColumn,endColumn,-1);
+    }
+    
+    
+    /*
+     * This is inherently flawed.
+     * It's doing a manual scan on the entire row.
+     * There has to be a way to have Accumulo at least begin on a specific column
+     */
+    private List<Entry> getHelper(ByteBuffer key,
+                                  byte[] startColumn, byte[] endColumn, int limit) throws StorageException {
+    	        
+        Scanner scanner;
+		try {
+			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
+		} catch (TableNotFoundException e) {
+			log.error("Table non-existant when scanning: {}",e);
+			throw new PermanentStorageException(e);
+		}
+        
+        Range range = new Range(new Text(toArray(key)));
+        scanner.setRange(range);
+        
+        List<Entry> list = new LinkedList<Entry>();
+        
+        Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
+        boolean scan = (startColumn == null);
+        int counter = 0;
+        
 
-        byte[] keyBytes = toArray(key);
-
-        Get g = new Get(keyBytes);
-        g.addFamily(columnFamilyBytes);
-        g.setFilter(getFilter);
-
-        List<Entry> ret = null;
-
-        try {
-            HTableInterface table = null;
-            Result r = null;
-
-            try {
-                table = pool.getTable(tableName);
-                r = table.get(g);
-            } finally {
-                if (null != table)
-                    table.close();
+        while (iter.hasNext()) {
+            try
+            {
+	        	java.util.Map.Entry<Key,Value> e = iter.next();
+	        	
+	        	Text colq = e.getKey().getColumnQualifier();
+	        	if (toArray(Text.encode(colq.toString())).equals(startColumn))
+	        	{
+	        		scan = true;
+	        	}
+	        	
+	        	if (toArray(Text.encode(colq.toString())).equals(endColumn))
+	        	{
+	        		scan = false;
+	        		break;
+	        	}
+	        	
+	        	if (scan)
+	        	{
+	        		list.add(new Entry(Text.encode(colq.toString()),Text.encode(e.getValue().toString())));
+	        		counter++;
+	        		if (counter == limit)
+	        		{
+	        			break;
+	        		}
+	        	}
             }
-
-            if (null == r)
-                return new ArrayList<Entry>(0);
-
-            int resultCount = r.size();
-
-            ret = new ArrayList<Entry>(resultCount);
-
-            Map<byte[], byte[]> fmap = r.getFamilyMap(columnFamilyBytes);
-
-            if (null != fmap) {
-                for (Map.Entry<byte[], byte[]> ent : fmap.entrySet()) {
-                    ret.add(new Entry(ByteBuffer.wrap(ent.getKey()), ByteBuffer.wrap(ent.getValue())));
-                }
+            catch (CharacterCodingException e)
+            {
+            	log.debug("Invalid character encoding : {}",e);
             }
-
-            return ret;
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
         }
+        
+
+        return list;
     }
 
     /*
@@ -238,59 +294,41 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
                        List<ByteBuffer> deletions, StoreTransaction txh) throws StorageException {
 
         byte[] keyBytes = toArray(key);
+        BatchWriter batchWriter;
+		try {
+			batchWriter = connector.createBatchWriter(tableName, 50000l, 300, 4);
+		} catch (TableNotFoundException e) {
+			log.error("Table not found: {}", e);
+			throw new PermanentStorageException(e);
+		}
+        org.apache.accumulo.core.data.Mutation accumuloMutation = new org.apache.accumulo.core.data.Mutation(new Text(keyBytes));
+        
 
-        // TODO use RowMutations (requires 0.94.x-ish HBase)
-        // error handling through the legacy batch() method sucks
-        //RowMutations rms = new RowMutations(keyBytes);
-        int totalsize = 0;
-
-        if (null != additions)
-            totalsize += additions.size();
-        if (null != deletions)
-            totalsize += deletions.size();
-
-        List<Row> batchOps = new ArrayList<Row>(totalsize);
 
         // Deletes
         if (null != deletions && 0 != deletions.size()) {
-            Delete d = new Delete(keyBytes);
-
             for (ByteBuffer del : deletions) {
-                d.deleteColumn(columnFamilyBytes, toArray(del.duplicate()));
+                accumuloMutation.putDelete(columnFamilyText, new Text(toArray(del.duplicate())));
+                log.debug("Removing {} {}", columnFamilyText, new Text(toArray(del.duplicate()).toString()));
             }
-
-            batchOps.add(d);
         }
 
         // Inserts
         if (null != additions && 0 != additions.size()) {
-            Put p = new Put(keyBytes);
-
             for (Entry e : additions) {
-                byte[] colBytes = toArray(e.getColumn().duplicate());
-                byte[] valBytes = toArray(e.getValue().duplicate());
-
-                p.add(columnFamilyBytes, colBytes, valBytes);
+                Text columnQualifier = new Text(toArray(e.getColumn().duplicate()));
+                Value value = new Value(toArray(e.getValue().duplicate()));
+                accumuloMutation.put(columnFamilyText, columnQualifier, value);
+                log.debug("Adding {} {}", columnQualifier.toString(), value.toString());
             }
-
-            batchOps.add(p);
         }
 
         try {
-            HTableInterface table = null;
-            try {
-                table = pool.getTable(tableName);
-                table.batch(batchOps);
-                table.flushCommits();
-            } finally {
-                if (null != table)
-                    table.close();
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        } catch (InterruptedException e) {
-            throw new TemporaryStorageException(e);
-        }
+			batchWriter.close();
+		} catch (MutationsRejectedException e) {
+			log.debug("Rows Rejected: {}",e);
+		}
+        
     }
 
     public void mutateMany(

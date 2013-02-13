@@ -1,19 +1,20 @@
-package com.thinkaurelius.titan.diskstorage.hbase;
+package com.thinkaurelius.titan.diskstorage.accumulo;
 
-import com.thinkaurelius.titan.HBaseStorageSetup;
+import com.thinkaurelius.titan.AccumuloStorageSetup;
 import com.thinkaurelius.titan.diskstorage.MultiWriteKeyColumnValueStoreTest;
 import com.thinkaurelius.titan.diskstorage.StorageException;
+import com.thinkaurelius.titan.diskstorage.accumulo.AccumuloStoreManager;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.KeyColumnValueStoreManager;
 import org.apache.commons.configuration.Configuration;
 
-public class ExternalHBaseMultiWriteKeyColumnValueStoreTest extends MultiWriteKeyColumnValueStoreTest {
+public class ExternalAccumuloMultiWriteKeyColumnValueStoreTest extends MultiWriteKeyColumnValueStoreTest {
 
     public KeyColumnValueStoreManager openStorageManager() throws StorageException {
-        return new HBaseStoreManager(getConfig());
+        return new AccumuloStoreManager(getConfig());
     }
 
     private Configuration getConfig() {
-        Configuration c = HBaseStorageSetup.getHBaseStorageConfiguration();
+        Configuration c = AccumuloStorageSetup.getAccumuloStorageConfiguration();
         return c;
     }
 }

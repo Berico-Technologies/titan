@@ -1,5 +1,6 @@
 package com.thinkaurelius.titan.diskstorage.accumulo;
 
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.thinkaurelius.titan.core.TitanException;
@@ -16,11 +17,27 @@ import com.thinkaurelius.titan.diskstorage.keycolumnvalue.Mutation;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreFeatures;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.StoreTransaction;
 import com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration;
-
+import org.apache.accumulo.core.client.AccumuloException;
+import org.apache.accumulo.core.client.AccumuloSecurityException;
+import org.apache.accumulo.core.client.BatchWriter;
+import org.apache.accumulo.core.client.Connector;
+import org.apache.accumulo.core.client.MultiTableBatchWriter;
+import org.apache.accumulo.core.client.MutationsRejectedException;
+import org.apache.accumulo.core.client.TableExistsException;
+import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.ZooKeeperInstance;
+import org.apache.accumulo.core.client.admin.TableOperations;
+import org.apache.accumulo.core.data.Value;
+import org.apache.commons.configuration.Configuration;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.apache.hadoop.io.Text;
+//Conflicts with Titan's Mutation implementation - must be referenced explicitly
+//import org.apache.accumulo.core.data.Mutation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -30,9 +47,10 @@ import java.util.List;
 import java.util.Map;
 
 import static com.thinkaurelius.titan.diskstorage.accumulo.AccumuloKeyColumnValueStore.toArray;
+import static com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration.STORAGE_DIRECTORY_KEY;
 
 /**
- * First attempt at creating an Accumulo storemanager
+ * First attempt at creating an Accumulo Store Manager
  * <p/>
  * This is not ready for production.
  *
@@ -40,65 +58,68 @@ import static com.thinkaurelius.titan.diskstorage.accumulo.AccumuloKeyColumnValu
  */
 public class AccumuloStoreManager extends DistributedStoreManager implements KeyColumnValueStoreManager {
 
-    private static final Logger log = LoggerFactory.getLogger(HBaseStoreManager.class);
+    private static final Logger log = LoggerFactory.getLogger(AccumuloStoreManager.class);
 
    
     public static final String INSTANCE_NAME_KEY = "instancename";
     public static final String INSTANCE_NAME_DEFAULT = "titan";
-    
+    private static final String TITAN_CONFIG_FILE_NAME = "titan-config.properties";
     public static final String TABLE_NAME_KEY = "tablename";
     public static final String TABLE_NAME_DEFAULT = "titan";
+    private static final String USER_NAME_KEY = "username";
+    private static final String PASSWORD_KEY = "password";
 
-    public static final int PORT_DEFAULT = 9160;
+    public static final int PORT_DEFAULT = 9997;
 
     public static final String ACCUMULO_CONFIGURATION_NAMESPACE = "accumulo-config";
 
-    public static final Map<String, String> ACCUMULO_CONFIGURATION_MAP = new ImmutableMap.Builder<String, String>().
-            put(GraphDatabaseConfiguration.HOSTNAME_KEY, "hbase.zookeeper.quorum").dl
-            put(GraphDatabaseConfiguration.PORT_KEY, "hbase.zookeeper.property.clientPort").
-            build();
-
+    private final File directory;
     private final String tableName;
-    private final org.apache.hadoop.conf.Configuration hconf;
+    private final String instanceName;
+   
 
     private final Map<String, AccumuloKeyColumnValueStore> openStores;
     private final StoreFeatures features;
-    private final Connector connectionPool;
+    private final Connector connector;
 
     public AccumuloStoreManager(org.apache.commons.configuration.Configuration config) throws StorageException {
         super(config, PORT_DEFAULT);
-        this.tableName = config.getString(TABLE_NAME_KEY, TABLE_NAME_DEFAULT);
-
-        this.hconf = HBaseConfiguration.create();
-        for (Map.Entry<String, String> confEntry : HBASE_CONFIGURATION_MAP.entrySet()) {
-            if (config.containsKey(confEntry.getKey())) {
-                hconf.set(confEntry.getValue(), config.getString(confEntry.getKey()));
-            }
+        this.tableName = config.getString(TABLE_NAME_KEY);
+        this.instanceName = config.getString(INSTANCE_NAME_KEY);
+        Preconditions.checkArgument(instanceName != null, "Need to specify instancename");
+        
+        String storageDir = config.getString(STORAGE_DIRECTORY_KEY);
+        Preconditions.checkArgument(storageDir != null, "Need to specify storage directory");
+        directory = new File(storageDir);
+        
+        String userName = config.getString(USER_NAME_KEY);
+        Preconditions.checkArgument(userName != null, "Need to specify username");
+        
+        String password = config.getString(PASSWORD_KEY);
+        Preconditions.checkArgument(password != null, "Need to specify password");
+        
+        String hostname = config.getString(GraphDatabaseConfiguration.HOSTNAME_KEY);
+        
+        ZooKeeperInstance zooKeeper = new ZooKeeperInstance(instanceName,hostname);
+        try
+        {
+        	connector = zooKeeper.getConnector(userName, password.getBytes());
+        }
+        catch (AccumuloSecurityException e)
+        {
+        	log.error("Invalid Credentials to ZooKeeper: {}",e);
+        	throw new PermanentStorageException(e);
+        }
+        catch (AccumuloException e)
+        {
+        	log.error("Unable to get connector from zookeeper: {}",e);
+        	throw new TemporaryStorageException(e);
         }
 
-        // Copy a subset of our commons config into a Hadoop config
-        org.apache.commons.configuration.Configuration hbCommons =
-                config.subset(ACCUMULO_CONFIGURATION_NAMESPACE);
-        @SuppressWarnings("unchecked") // I hope commons-config eventually fixes this
-                Iterator<String> keys = hbCommons.getKeys();
-        int keysLoaded = 0;
-
-        while (keys.hasNext()) {
-            String key = keys.next();
-            String value = hbCommons.getString(key);
-            log.debug("Accumulo configuration: setting {}={}", key, value);
-            hconf.set(key, value);
-            keysLoaded++;
-        }
-
-        log.debug("Accumulo configuration: set a total of {} configuration values", keysLoaded);
-
-        connectionPool = new ZooKeeperInstance(instance(hconf, connectionPoolSize);
-
-        openStores = new HashMap<String, HBaseKeyColumnValueStore>();
+        openStores = new HashMap<String, AccumuloKeyColumnValueStore>();
 
         features = new StoreFeatures();
-        features.supportsScan = true;
+        features.supportsScan = false;
         features.supportsBatchMutation = true;
         features.supportsTransactions = false;
         features.supportsConsistentKeyOperations = true;
@@ -106,6 +127,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
         features.isKeyOrdered = false;
         features.isDistributed = true;
         features.hasLocalKeyPartition = false;
+       
     }
 
 
@@ -126,80 +148,63 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
     }
 
     @Override
-    public void mutateMany(Map<String, Map<ByteBuffer, Mutation>> mutations, StoreTransaction txh) throws StorageException {
-
-        Map<ByteBuffer, Put> puts = new HashMap<ByteBuffer, Put>();
-        Map<ByteBuffer, Delete> dels = new HashMap<ByteBuffer, Delete>();
-
-
-        final long delTS = System.currentTimeMillis();
-        final long putTS = delTS + 1;
+    public void mutateMany(Map<String, Map<ByteBuffer, Mutation>> mutations, StoreTransaction txh) throws StorageException{    	
+        
+        MultiTableBatchWriter multiTableBatchWriter = connector.createMultiTableBatchWriter(200000l, 200, 4);
+        BatchWriter batchWriter;
+		try {
+			batchWriter = multiTableBatchWriter.getBatchWriter(tableName);
+		} catch (AccumuloException e) {
+			log.error("Accumulo Exception:{}",e);
+			throw new PermanentStorageException(e);
+		} catch (AccumuloSecurityException e) {
+			log.error("Invalid Credentials:{}",e);
+			throw new PermanentStorageException(e);
+		} catch (TableNotFoundException e) {
+			log.error("Table Does Not Exist:{}",e);
+			throw new PermanentStorageException(e);
+		}
 
         for (Map.Entry<String, Map<ByteBuffer, Mutation>> mutEntry : mutations.entrySet()) {
-            byte[] columnFamilyBytes = mutEntry.getKey().getBytes();
+            Text columnFamily = new Text(mutEntry.getKey());
             for (Map.Entry<ByteBuffer, Mutation> rowMutation : mutEntry.getValue().entrySet()) {
-                ByteBuffer keyBB = rowMutation.getKey();
+                Text key = new Text(toArray(rowMutation.getKey()));
                 Mutation mutation = rowMutation.getValue();
-
+                org.apache.accumulo.core.data.Mutation accumuloMutation = new org.apache.accumulo.core.data.Mutation(key);
+                
                 if (mutation.hasDeletions()) {
-                    Delete d = dels.get(keyBB);
-                    if (null == d) {
-                        d = new Delete(toArray(keyBB), delTS, null);
-                        dels.put(keyBB, d);
-                    }
-
                     for (ByteBuffer b : mutation.getDeletions()) {
-                        d.deleteColumns(columnFamilyBytes, toArray(b), delTS);
+                        Text columnQualifier = new Text(toArray(b));
+                        accumuloMutation.putDelete(columnFamily, columnQualifier);
                     }
                 }
 
                 if (mutation.hasAdditions()) {
-                    Put p = puts.get(keyBB);
-                    if (null == p) {
-                        p = new Put(toArray(keyBB), putTS);
-                        puts.put(keyBB, p);
-                    }
+
 
                     for (Entry e : mutation.getAdditions()) {
-                        byte[] colBytes = toArray(e.getColumn());
-                        byte[] valBytes = toArray(e.getValue());
-                        p.add(columnFamilyBytes, colBytes, putTS, valBytes);
+                        Text column = new Text(toArray(e.getColumn()));
+                        Value value = new Value(toArray(e.getValue()));
+                        accumuloMutation.put(columnFamily, column, value);
+                     
                     }
                 }
+                
+                try {
+					batchWriter.addMutation(accumuloMutation);
+				} catch (MutationsRejectedException e) {
+					log.error("Rejected Mutation: {}", e);
+				}
             }
         }
 
-        List<Row> batchOps = new LinkedList<Row>();
-        for (Delete d : dels.values()) batchOps.add(d);
-        for (Put p : puts.values()) batchOps.add(p);
-        dels = null;
-        puts = null;
-
+        
         try {
-            HTableInterface table = null;
-            try {
-                table = connectionPool.getTable(tableName);
-                table.batch(batchOps);
-                table.flushCommits();
-            } finally {
-                if (null != table)
-                    table.close();
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        } catch (InterruptedException e) {
-            throw new TemporaryStorageException(e);
-        }
+			multiTableBatchWriter.close();
+		} catch (MutationsRejectedException e) {
+			log.error("Rejected Mutation: {}", e);
+		}
 
-        long now = System.currentTimeMillis();
-        while (now <= putTS) {
-            try {
-                Thread.sleep(1L);
-                now = System.currentTimeMillis();
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
     }
 
     @Override
@@ -207,47 +212,23 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
         if (openStores.containsKey(name))
             return openStores.get(name);
 
-        HBaseAdmin adm = getAdminInterface();
+            if (!connector.tableOperations().exists(tableName)) {
+            	try {
+					connector.tableOperations().create(tableName);
+				} catch (AccumuloException e) {
+					log.error("Accumulo Exception:{}",e);
+					throw new PermanentStorageException(e);
+				} catch (AccumuloSecurityException e) {
+					log.error("Invalid Credentials:{}",e);
+					throw new PermanentStorageException(e);
+				} catch (TableExistsException e) {
+					log.error("Table Already Exists:{}",e);
+					throw new TemporaryStorageException(e);
+				}
+            } 
 
-        HTableDescriptor desc;
 
-        try { // Create our table, if necessary
-            if (adm.tableExists(tableName)) {
-                desc = adm.getTableDescriptor(tableName.getBytes());
-            } else {
-                desc = new HTableDescriptor(tableName);
-                adm.createTable(desc);
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        }
-
-        Preconditions.checkNotNull(desc);
-
-        // Create our column family, if necessary
-        if (null == desc.getFamily(name.getBytes())) {
-            try {
-                adm.disableTable(tableName);
-                desc.addFamily(new HColumnDescriptor(name));
-                adm.modifyTable(tableName.getBytes(), desc);
-                log.debug("Added HBase column family {}", name);
-                try {
-                    Thread.sleep(1000L);
-                } catch (InterruptedException ie) {
-                    throw new TemporaryStorageException(ie);
-                }
-                adm.enableTable(tableName);
-            } catch (TableNotFoundException ee) {
-                log.error("TableNotFoundException", ee);
-                throw new PermanentStorageException(ee);
-            } catch (org.apache.hadoop.hbase.TableExistsException ee) {
-                log.debug("Swallowing exception {}", ee);
-            } catch (IOException ee) {
-                throw new TemporaryStorageException(ee);
-            }
-        }
-
-        HBaseKeyColumnValueStore store = new HBaseKeyColumnValueStore(connectionPool, tableName, name, this);
+        AccumuloKeyColumnValueStore store = new AccumuloKeyColumnValueStore(connector, tableName, name, this);
         openStores.put(name, store);
 
         return store;
@@ -255,7 +236,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
 
     @Override
     public StoreTransaction beginTransaction(ConsistencyLevel level) throws StorageException {
-        return new HBaseTransaction(level);
+        return new AccumuloTransaction(level);
     }
 
 
@@ -265,68 +246,67 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
      */
     @Override
     public void clearStorage() throws StorageException {
-        HTable table = null;
-        try {
-            table = new HTable(hconf, tableName);
-            Scan scan = new Scan();
-            scan.setBatch(100);
-            scan.setCacheBlocks(false);
-            scan.setCaching(2000);
-            ResultScanner resScan = null;
-            try {
-                resScan = table.getScanner(scan);
+    	for (String table : connector.tableOperations().list())
+    	{
+    		if (table.equals("!METADATA"))
+    		{
+    			continue;
+    		}
+    		try {
+				connector.tableOperations().delete(table);
+			} catch (AccumuloException e) {
+				log.error("Unknown Error: {}",e);
+				throw new TemporaryStorageException(e);
+			} catch (AccumuloSecurityException e) {
+				log.debug("Invalid credentials: {}",e);
+				throw new PermanentStorageException(e);
+			} catch (TableNotFoundException e) {
+				log.debug("Attempting to delete already removed table - ignoring: {}",e);
+			}
+    		
+    	}
+    }
 
-                for (Result res : resScan) {
-                    Delete del = new Delete(res.getRow());
-                    table.delete(del);
-                }
-            } finally {
-                if (resScan != null) {
-                    resScan.close();
-                }
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        } finally {
-            if (table != null) {
-                try {
-                    table.close();
-                } catch (IOException e) {
-                }
-            }
+    @Override
+    public String getConfigurationProperty(String key) throws StorageException {
+        File configFile = getConfigFile(directory);
+
+        if (!configFile.exists()) //property has not been defined
+            return null;
+
+        Preconditions.checkArgument(configFile.isFile());
+        try {
+            Configuration config = new PropertiesConfiguration(configFile);
+            return config.getString(key, null);
+        } catch (ConfigurationException e) {
+            throw new PermanentStorageException("Could not read from configuration file", e);
         }
     }
 
     @Override
-    public String getConfigurationProperty(final String key) throws StorageException {
+    public void setConfigurationProperty(String key, String value) throws StorageException {
+        File configFile = getConfigFile(directory);
+
         try {
-            return getAdminInterface().getTableDescriptor(tableName.getBytes()).getValue(key);
-        } catch (IOException e) {
-            throw new PermanentStorageException(e);
+            PropertiesConfiguration config = new PropertiesConfiguration(configFile);
+            config.setProperty(key, value);
+            config.save();
+        } catch (ConfigurationException e) {
+            throw new PermanentStorageException("Could not save configuration file", e);
         }
     }
 
-    @Override
-    public void setConfigurationProperty(final String key, final String value) throws StorageException {
-        byte[] name = tableName.getBytes();
+    private static File getConfigFile(File dbDirectory) {
+        return new File(dbDirectory.getAbsolutePath() + File.separator + TITAN_CONFIG_FILE_NAME);
+    }
+    
+    static byte[] toArray(ByteBuffer b) {
+        if (0 == b.arrayOffset() && b.limit() == b.array().length)
+            return b.array();
 
-        try {
-            HBaseAdmin adm = getAdminInterface();
-
-            HTableDescriptor desc = adm.getTableDescriptor(name);
-            desc.setValue(key, value);
-
-            adm.modifyTable(name, desc);
-        } catch (IOException e) {
-            throw new PermanentStorageException(e);
-        }
+        byte[] result = new byte[b.limit()];
+        b.duplicate().get(result);
+        return result;
     }
 
-    private HBaseAdmin getAdminInterface() {
-        try {
-            return new HBaseAdmin(hconf);
-        } catch (IOException e) {
-            throw new TitanException(e);
-        }
-    }
 }

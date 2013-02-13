@@ -1,9 +1,9 @@
 package com.thinkaurelius.titan.blueprints;
 
-import com.thinkaurelius.titan.HBaseStorageSetup;
+import com.thinkaurelius.titan.AccumuloStorageSetup;
 import com.thinkaurelius.titan.core.TitanFactory;
 import com.thinkaurelius.titan.diskstorage.StorageException;
-import com.thinkaurelius.titan.diskstorage.hbase.HBaseStoreManager;
+import com.thinkaurelius.titan.diskstorage.accumulo.AccumuloStoreManager;
 import com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration;
 import com.tinkerpop.blueprints.Graph;
 
@@ -11,29 +11,29 @@ import com.tinkerpop.blueprints.Graph;
  * (c) Matthias Broecheler (me@matthiasb.com)
  */
 
-public class ExternalHBaseBlueprintsTest extends TitanBlueprintsTest {
+public class ExternalAccumuloBlueprintsTest extends TitanBlueprintsTest {
 
 
     @Override
     public void startUp() {
-        //Start HBase
+
     }
 
     @Override
     public void shutDown() {
-        //Stop HBase
+  
     }
 
     @Override
     public Graph generateGraph() {
-        Graph graph = TitanFactory.open(HBaseStorageSetup.getHBaseGraphConfiguration());
+        Graph graph = TitanFactory.open(AccumuloStorageSetup.getAccumuloGraphConfiguration());
         return graph;
     }
 
     @Override
     public void cleanUp() throws StorageException {
-        HBaseStoreManager s = new HBaseStoreManager(
-                HBaseStorageSetup.getHBaseGraphConfiguration().subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE));
+        AccumuloStoreManager s = new AccumuloStoreManager(
+                AccumuloStorageSetup.getAccumuloGraphConfiguration().subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE));
         s.clearStorage();
     }
 

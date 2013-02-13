@@ -1,16 +1,17 @@
-package com.thinkaurelius.titan.diskstorage.hbase;
+package com.thinkaurelius.titan.diskstorage.accumulo;
 
-import com.thinkaurelius.titan.HBaseStorageSetup;
+import com.thinkaurelius.titan.AccumuloStorageSetup;
 import com.thinkaurelius.titan.diskstorage.LockKeyColumnValueStoreTest;
 import com.thinkaurelius.titan.diskstorage.StorageException;
+import com.thinkaurelius.titan.diskstorage.accumulo.AccumuloStoreManager;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.KeyColumnValueStoreManager;
 import org.apache.commons.configuration.Configuration;
 
-public class ExternalHBaseLockKeyColumnValueStoreTest
+public class ExternalAccumuloLockKeyColumnValueStoreTest
         extends LockKeyColumnValueStoreTest {
 
     public KeyColumnValueStoreManager openStorageManager(int idx) throws StorageException {
-        Configuration sc = HBaseStorageSetup.getHBaseStorageConfiguration();
-        return new HBaseStoreManager(sc);
+        Configuration sc = AccumuloStorageSetup.getAccumuloStorageConfiguration();
+        return new AccumuloStoreManager(sc);
     }
 }

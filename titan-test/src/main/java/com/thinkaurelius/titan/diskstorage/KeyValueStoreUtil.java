@@ -31,7 +31,7 @@ public class KeyValueStoreUtil {
         String[][] ret = new String[numKeys][numColumns];
         for (int i = 0; i < numKeys; i++) {
             for (int j = 0; j < numColumns; j++) {
-                ret[i][j] = RandomGenerator.randomString();
+                ret[i][j] = RandomGenerator.randomString();;
             }
         }
         return ret;
