@@ -80,67 +80,38 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
    			log.error("Table non-existant when scanning: {}",e);
    			throw new PermanentStorageException(e);
    		}
-           
-           Range range = new Range(new Text(toArray(key)));
+
+
+
+        Key rangeKey = new Key(new Text(toArray(key)),columnFamilyText, new Text(colBytes));
+
+        Range range = new Range(rangeKey,true,null,false);
+
+
 
            
-           IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
-           try {
-   			RegExFilter.setRegexs(cfg, null, columnFamily, Text.decode(colBytes), null, false);
-   		} catch (CharacterCodingException e) {
-   			log.warn("Invalid Character Encoding: {}",e);
-   		}
+//        IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
+//           try {
+//   			RegExFilter.setRegexs(cfg, null, columnFamily, Text.decode(colBytes), null, false);
+//   		} catch (CharacterCodingException e) {
+//   			log.warn("Invalid Character Encoding: {}",e);
+//   		}
            scanner.setRange(range);
-           scanner.addScanIterator(cfg);
-               
-           Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
-           
-           if (iter.hasNext())
-           {
-        	   java.util.Map.Entry<Key,Value> e = iter.next();
-        	   
-        	   try {
-				return Text.encode(e.getValue().toString());
-			} catch (CharacterCodingException e1) {
-	   			log.warn("Invalid Character Encoding: {}",e1);
-	   			return null;
-	   		}
+
+
+           //scanner.addScanIterator(cfg);
+           for (java.util.Map.Entry<Key,Value> entry : scanner) {
+               if (entry.getValue().getSize() > 0)
+			    return ByteBuffer.wrap(entry.getValue().get());
            }
-           else
-           {
-        	   return null;
-           }
-           
+
+        return null;
     }
 
     @Override
     public boolean containsKeyColumn(ByteBuffer key, ByteBuffer column,
                                      StoreTransaction txh) throws StorageException {
-        Scanner scanner;
-		try {
-			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
-		} catch (TableNotFoundException e) {
-			log.error("Table non-existant when scanning: {}",e);
-			throw new PermanentStorageException(e);
-		}
-        
-        Range range = new Range(new Text(toArray(key)));
-
-        IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
-        String columnName = "";
-		try {
-			columnName = Text.decode(toArray(column));
-		} catch (CharacterCodingException e) {
-			log.error("Invalid encoding: {}",e);
-		}
-		RegExFilter.setRegexs(cfg, null, columnFamily, columnName, null, false);
-		log.debug("Column Family: {} Column Value: {}", columnFamily, columnName);
-        scanner.setRange(range);
-        scanner.addScanIterator(cfg);
-            
-        Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
-        log.debug("The key column exists: {}",iter.hasNext());
-        return iter.hasNext();
+        return (get(key,column,txh) != null);
     }
 
 
@@ -154,15 +125,13 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 			log.error("Table non-existant when scanning: {}",e);
 			throw new PermanentStorageException(e);
 		}
-        
+
+
         Range range = new Range(new Text(toArray(key)));
 
-        
-        IteratorSetting cfg = new IteratorSetting(1, RegExFilter.class);
-        RegExFilter.setRegexs(cfg, null, columnFamily, null, null, false);
         scanner.setRange(range);
-        scanner.addScanIterator(cfg);
-            
+        scanner.fetchColumnFamily(columnFamilyText);
+
         Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
         
         return iter.hasNext();
@@ -194,12 +163,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
     	return getHelper(key,startColumn,endColumn,-1);
     }
     
-    
-    /*
-     * This is inherently flawed.
-     * It's doing a manual scan on the entire row.
-     * There has to be a way to have Accumulo at least begin on a specific column
-     */
+
     private List<Entry> getHelper(ByteBuffer key,
                                   byte[] startColumn, byte[] endColumn, int limit) throws StorageException {
     	        
@@ -210,76 +174,43 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 			log.error("Table non-existant when scanning: {}",e);
 			throw new PermanentStorageException(e);
 		}
-        
-        Range range = new Range(new Text(toArray(key)));
+        Key startKey = null, endKey = null;
+        if (startColumn != null)
+        {
+            startKey = new Key(new Text(toArray(key)),new Text(columnFamily), new Text(startColumn));
+        }
+        if (endColumn != null)
+        {
+            endKey = new Key(new Text(toArray(key)),new Text(columnFamily), new Text(endColumn));
+        }
+
+
+        Range range = new Range(startKey,true,endKey,false);
+
         scanner.setRange(range);
         
         List<Entry> list = new LinkedList<Entry>();
         
         Iterator<java.util.Map.Entry<Key, Value>> iter = scanner.iterator();
-        boolean scan = (startColumn == null);
+
         int counter = 0;
-        
 
         while (iter.hasNext()) {
-            try
-            {
 	        	java.util.Map.Entry<Key,Value> e = iter.next();
-	        	
-	        	Text colq = e.getKey().getColumnQualifier();
-	        	if (toArray(Text.encode(colq.toString())).equals(startColumn))
-	        	{
-	        		scan = true;
-	        	}
-	        	
-	        	if (toArray(Text.encode(colq.toString())).equals(endColumn))
-	        	{
-	        		scan = false;
-	        		break;
-	        	}
-	        	
-	        	if (scan)
-	        	{
-	        		list.add(new Entry(Text.encode(colq.toString()),Text.encode(e.getValue().toString())));
-	        		counter++;
-	        		if (counter == limit)
-	        		{
-	        			break;
-	        		}
-	        	}
-            }
-            catch (CharacterCodingException e)
-            {
-            	log.debug("Invalid character encoding : {}",e);
-            }
+                    Text colq = e.getKey().getColumnQualifier();
+
+                    list.add(new Entry(ByteBuffer.wrap(colq.getBytes()),ByteBuffer.wrap(e.getValue().get())));
+                    counter++;
+                    if (counter == limit)
+                    {
+                        break;
+                    }
         }
         
 
         return list;
     }
 
-    /*
-     * This method exists because HBase's API generally deals in
-     * whole byte[] arrays.  That is, data are always assumed to
-     * begin at index zero and run through the native length of
-     * the array.  These assumptions are reflected, for example,
-     * in the classes hbase.client.Get and hbase.client.Scan.
-     * These assumptions about arrays are not generally true when
-     * dealing with ByteBuffers.
-     * <p>
-     * This method first checks whether the array backing the
-     * ByteBuffer argument indeed satisfies the assumptions described
-     * above.  If so, then this method returns the backing array.
-     * In other words, this case returns {@code b.array()}.
-     * <p>
-     * If the ByteBuffer argument does not satisfy the array
-     * assumptions described above, then a new native array of length
-     * {@code b.limit()} is created.  The ByteBuffer's contents
-     * are copied into the new native array without modifying the
-     * state of {@code b} (using {@code b.duplicate()}).  The new
-     * native array is then returned.
-     *
-     */
     static byte[] toArray(ByteBuffer b) {
         if (0 == b.arrayOffset() && b.limit() == b.array().length)
             return b.array();
@@ -309,7 +240,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
         if (null != deletions && 0 != deletions.size()) {
             for (ByteBuffer del : deletions) {
                 accumuloMutation.putDelete(columnFamilyText, new Text(toArray(del.duplicate())));
-                log.debug("Removing {} {}", columnFamilyText, new Text(toArray(del.duplicate()).toString()));
+                log.debug("Removing {} {}", columnFamilyText, new Text(toArray(del.duplicate())));
             }
         }
 
@@ -321,6 +252,12 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
                 accumuloMutation.put(columnFamilyText, columnQualifier, value);
                 log.debug("Adding {} {}", columnQualifier.toString(), value.toString());
             }
+        }
+
+        try{
+            batchWriter.addMutation(accumuloMutation);
+        } catch (MutationsRejectedException e) {
+            log.debug("Rows Rejected: {}",e);
         }
 
         try {
