@@ -13,12 +13,17 @@
     <dependencies>
         <dependency>
             <groupId>com.thinkaurelius.titan</groupId>
-            <artifactId>titan-cassandra</artifactId>
+            <artifactId>titan-berkeleyje</artifactId>
             <version>${titan.version}</version>
         </dependency>
         <dependency>
             <groupId>com.thinkaurelius.titan</groupId>
-            <artifactId>titan-berkeleyje</artifactId>
+            <artifactId>titan-hbase</artifactId>
+            <version>${titan.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.thinkaurelius.titan</groupId>
+            <artifactId>titan-cassandra</artifactId>
             <version>${titan.version}</version>
         </dependency>
         <dependency>

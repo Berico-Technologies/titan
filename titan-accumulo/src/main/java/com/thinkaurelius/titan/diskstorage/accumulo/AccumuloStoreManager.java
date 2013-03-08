@@ -168,14 +168,14 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
         for (Map.Entry<String, Map<ByteBuffer, Mutation>> mutEntry : mutations.entrySet()) {
             Text columnFamily = new Text(mutEntry.getKey());
             for (Map.Entry<ByteBuffer, Mutation> rowMutation : mutEntry.getValue().entrySet()) {
-                Text key = new Text(toArray(rowMutation.getKey()));
+                Text key = new Text(toArray(rowMutation.getKey().duplicate()));
                 Mutation mutation = rowMutation.getValue();
                 org.apache.accumulo.core.data.Mutation accumuloMutation = new org.apache.accumulo.core.data.Mutation(key);
                 
                 if (mutation.hasDeletions()) {
                     for (ByteBuffer b : mutation.getDeletions()) {
                         Text columnQualifier = new Text(toArray(b));
-                        accumuloMutation.putDelete(columnFamily, columnQualifier);
+                        accumuloMutation.putDelete(columnFamily, columnQualifier, System.currentTimeMillis()-1);
                     }
                 }
 
@@ -185,7 +185,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
                     for (Entry e : mutation.getAdditions()) {
                         Text column = new Text(toArray(e.getColumn()));
                         Value value = new Value(toArray(e.getValue()));
-                        accumuloMutation.put(columnFamily, column, value);
+                        accumuloMutation.put(columnFamily, column, System.currentTimeMillis(),value);
                      
                     }
                 }

@@ -1,0 +1,8 @@
+storage.backend=accumulo
+storage.hostname=127.0.0.1
+storage.directory=/tmp/graph
+storage.username=root
+storage.password=XXX
+storage.instancename=titan
+storage.tablename=titan
+storage.hostname=localhost

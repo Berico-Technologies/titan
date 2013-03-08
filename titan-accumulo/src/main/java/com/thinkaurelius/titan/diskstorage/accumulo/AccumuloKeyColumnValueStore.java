@@ -65,7 +65,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 
     @Override
     public void close() throws StorageException {
-    	
+
     }
 
     @Override
@@ -83,9 +83,12 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 
 
 
-        Key rangeKey = new Key(new Text(toArray(key)),columnFamilyText, new Text(colBytes));
+        //Key rangeKey = new Key(new Text(toArray(key)),columnFamilyText, new Text(colBytes));
 
-        Range range = new Range(rangeKey,true,null,false);
+        Range range = new Range(new Text(toArray(key)));
+        scanner.setRange(range);
+        scanner.fetchColumn(columnFamilyText, new Text(colBytes));
+
 
 
 
@@ -96,7 +99,6 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 //   		} catch (CharacterCodingException e) {
 //   			log.warn("Invalid Character Encoding: {}",e);
 //   		}
-           scanner.setRange(range);
 
 
            //scanner.addScanIterator(cfg);
@@ -141,7 +143,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
     public List<Entry> getSlice(ByteBuffer key, ByteBuffer columnStart,
                                 ByteBuffer columnEnd, int limit, StoreTransaction txh) throws StorageException {
 
-        byte[] colStartBytes = columnEnd.hasRemaining() ? toArray(columnStart) : null;
+        byte[] colStartBytes = columnStart.hasRemaining() ? toArray(columnStart) : null;
         byte[] colEndBytes = columnEnd.hasRemaining() ? toArray(columnEnd) : null;
 
         return getHelper(key, colStartBytes,colEndBytes,limit);
@@ -151,7 +153,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
     public List<Entry> getSlice(ByteBuffer key, ByteBuffer columnStart,
                                 ByteBuffer columnEnd, StoreTransaction txh) throws StorageException {
 
-        byte[] colStartBytes = columnEnd.hasRemaining() ? toArray(columnStart) : null;
+        byte[] colStartBytes = columnStart.hasRemaining() ? toArray(columnStart) : null;
         byte[] colEndBytes = columnEnd.hasRemaining() ? toArray(columnEnd) : null;
 
 
@@ -184,8 +186,17 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
             endKey = new Key(new Text(toArray(key)),new Text(columnFamily), new Text(endColumn));
         }
 
+        Range range = null;
+        if (startKey == null && endKey == null)
+        {
+           range = new Range(new Text(toArray(key)));
+        }
+        else
+        {
+           range = new Range(startKey,true,endKey,false);
+        }
 
-        Range range = new Range(startKey,true,endKey,false);
+
 
         scanner.setRange(range);
         
@@ -239,9 +250,10 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
         // Deletes
         if (null != deletions && 0 != deletions.size()) {
             for (ByteBuffer del : deletions) {
-                accumuloMutation.putDelete(columnFamilyText, new Text(toArray(del.duplicate())));
+                accumuloMutation.putDelete(columnFamilyText, new Text(toArray(del.duplicate())),System.currentTimeMillis()-1);
                 log.debug("Removing {} {}", columnFamilyText, new Text(toArray(del.duplicate())));
             }
+
         }
 
         // Inserts
@@ -249,7 +261,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
             for (Entry e : additions) {
                 Text columnQualifier = new Text(toArray(e.getColumn().duplicate()));
                 Value value = new Value(toArray(e.getValue().duplicate()));
-                accumuloMutation.put(columnFamilyText, columnQualifier, value);
+                accumuloMutation.put(columnFamilyText, columnQualifier,System.currentTimeMillis(), value);
                 log.debug("Adding {} {}", columnQualifier.toString(), value.toString());
             }
         }

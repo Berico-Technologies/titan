@@ -22,6 +22,12 @@
             <version>${titan.version}</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.thrift</groupId>
+            <artifactId>libthrift</artifactId>
+            <version>[0.6.1]</version>
+            <scope>runtime</scope>
+        </dependency>
 		<dependency>
 			<groupId>org.apache.accumulo</groupId>
 			<artifactId>accumulo-core</artifactId>
@@ -35,8 +41,7 @@
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-core</artifactId>
-            <!-- Update the hbase artifact version when you update this -->
-            <version>1.0.4</version>
+            <version>1.0.3</version>
         </dependency>
     </dependencies>
     <profiles>
@@ -84,10 +89,8 @@
                         <version>2.12.1</version>
                         <configuration>
                             <argLine>-Xms256m -Xmx1024m</argLine>
-                            <includes>
-                                <include>**/diskstorage/accumulo/*KeyColumnValueTest.java</include>
-                            </includes>
                             <excludes>
+                                <exclude>**/External*.java</exclude>
                                 <exclude>**/Internal*.java</exclude>
                                 <exclude>**/*Suite.java</exclude>
                             </excludes>
