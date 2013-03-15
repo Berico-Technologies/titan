@@ -13,12 +13,8 @@ import com.thinkaurelius.titan.graphdb.database.serialize.Serializer;
 import com.thinkaurelius.titan.graphdb.database.serialize.kryo.KryoSerializer;
 
 import org.apache.accumulo.core.Constants;
-import org.apache.accumulo.core.client.BatchWriter;
-import org.apache.accumulo.core.client.Connector;
-import org.apache.accumulo.core.client.IteratorSetting;
-import org.apache.accumulo.core.client.Scanner;
-import org.apache.accumulo.core.client.MutationsRejectedException;
-import org.apache.accumulo.core.client.TableNotFoundException;
+import org.apache.accumulo.core.client.*;
+import org.apache.accumulo.core.data.PartialKey;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.data.Key;
@@ -173,7 +169,7 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 		try {
 			scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
 		} catch (TableNotFoundException e) {
-			log.error("Table non-existant when scanning: {}",e);
+			log.error("Table non-existent when scanning: {}",e);
 			throw new PermanentStorageException(e);
 		}
         Key startKey = null, endKey = null;
@@ -294,7 +290,20 @@ public class AccumuloKeyColumnValueStore implements KeyColumnValueStore {
 
     @Override
     public RecordIterator<ByteBuffer> getKeys(StoreTransaction txh) throws StorageException {
-        throw new UnsupportedOperationException();
+        Scanner scanner;
+        try {
+            scanner = connector.createScanner(tableName, Constants.NO_AUTHS);
+        } catch (TableNotFoundException e) {
+            log.error("Table non-existent when scanning: {}",e);
+            throw new PermanentStorageException(e);
+        }
+        scanner.fetchColumnFamily(columnFamilyText);
+        RowIterator rowIterator = new RowIterator(scanner);
+
+        AccumuloRecordIteratorAdaptor it = new AccumuloRecordIteratorAdaptor(rowIterator);
+        return it;
+
+
     }
 
     @Override

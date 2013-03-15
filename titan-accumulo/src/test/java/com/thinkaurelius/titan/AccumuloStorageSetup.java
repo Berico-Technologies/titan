@@ -29,7 +29,7 @@ public class AccumuloStorageSetup {
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty(GraphDatabaseConfiguration.STORAGE_BACKEND_KEY, "accumulo");
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty(GraphDatabaseConfiguration.STORAGE_DIRECTORY_KEY, "/tmp/graph");
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("username", "root");
-        config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("password", "tsccMMC992");
+        config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("password", "XXX");
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("instancename", "titan");
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("tablename", "titan");
         config.subset(GraphDatabaseConfiguration.STORAGE_NAMESPACE).addProperty("hostname", "localhost");

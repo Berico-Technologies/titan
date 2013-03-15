@@ -119,7 +119,7 @@ public class AccumuloStoreManager extends DistributedStoreManager implements Key
         openStores = new HashMap<String, AccumuloKeyColumnValueStore>();
 
         features = new StoreFeatures();
-        features.supportsScan = false;
+        features.supportsScan = true;
         features.supportsBatchMutation = true;
         features.supportsTransactions = false;
         features.supportsConsistentKeyOperations = true;
